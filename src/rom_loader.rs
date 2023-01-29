@@ -6,37 +6,29 @@ pub fn load_test_prog(cpu: &mut CPU)
 {
     unsafe {
         let mut i = PROG_MEM_START_OFFSET as usize;
-        // call func @ 0x2F0
-        RAM[i] = 0x22;
-        RAM[i + 1] = 0xF0;
-        i += 2;
 
-        // I = 255
-        RAM[i] = 0xA0;
-        RAM[i + 1] = 0xFF;
-        i += 2;
-
-        // V1 = 255
-        RAM[i] = 0x61;
-        RAM[i + 1] = 0xFF;
-        i += 2;
-
-        // V0 = V1 >> 1
-        RAM[i] = 0xB1;
-        RAM[i + 1] = 0x11;
-        i += 2;
-
-        // func @ 0x2F0
         // V0 = 2
-        RAM[0x2F0] = 0x60;
-        RAM[0x2F0 + 1] = 0x02;
-        // return
-        RAM[0x2F0 + 2] = 0x00;
-        RAM[0x2F0 + 3] = 0xEE;
+        RAM[i] = 0x60;
+        RAM[i + 1] = 0x02;
+        i += 2;
+
+        // V1 += 1
+        RAM[i] = 0x71;
+        RAM[i + 1] = 0x01;
+        i += 2;
+
+        // skip next if V0 is pressed (EX9E)
+        RAM[i] = 0xE0;
+        RAM[i + 1] = 0x9E;
+        i += 2;
+
+        // jump to 0x202 (V1 += 1) - 1NNN
+        RAM[i] = 0x12;
+        RAM[i + 1] = 0x00;
+        i += 2;
     }
 
     cpu.set_prog_counter(PROG_MEM_START_OFFSET);
-    cpu.set_mode(CPUMode::Chip48);
 }
 
 pub fn load_prog(cpu: &mut CPU, prog_path: &str) -> bool

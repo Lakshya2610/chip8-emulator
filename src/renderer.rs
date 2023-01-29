@@ -6,16 +6,26 @@ use sdl2::rect::Point;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
+use sdl2::keyboard::*;
+use std::collections::HashMap;
 
 pub const DISPLAY_WIDTH: u32 = 64;
 pub const DISPLAY_HEIGHT: u32 = 32;
 const DISPLAY_SCALE: u32 = 10;
 
+static VALID_KEYS: [Scancode; 16] = [
+    Scancode::Num1, Scancode::Num2, Scancode::Num3, Scancode::Num4,
+    Scancode::Q, Scancode::W, Scancode::E, Scancode::R,
+    Scancode::A, Scancode::S, Scancode::D, Scancode::F,
+    Scancode::Z, Scancode::X, Scancode::C, Scancode::V
+];
+
 pub struct Renderer {
     pixel_buffer: [u8; DISPLAY_WIDTH as usize * DISPLAY_HEIGHT as usize],
     display: Option<Canvas<Window>>,
-    event_pump: Option<EventPump>
+    event_pump: Option<EventPump>,
+    keys_pressed: Vec<Scancode>,
+    key_to_scancode_table: HashMap<u8, Scancode>
 }
 
 impl Renderer {
@@ -63,11 +73,18 @@ impl Renderer {
         canvas.draw_points(points.as_slice()).unwrap();
         self.refresh_screen();
         
+        self.keys_pressed.clear();
         for event in self.event_pump.as_mut().unwrap().poll_iter() {
             match event {
-                Event::Quit {..} |
-                Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                    return true;
+                Event::Quit {..} => { return true; }
+                Event::KeyDown { scancode: Some(key), .. } => {
+                    if VALID_KEYS.contains(&key) {
+                        self.keys_pressed.push(key);
+                    }
+
+                    if key == Scancode::Escape {
+                        return true;
+                    }
                 },
                 _ => {}
             }
@@ -94,9 +111,48 @@ impl Renderer {
         self.display.as_mut().unwrap().present();
     }
 
+    pub fn is_key_pressed(&mut self, key: u8) -> bool {
+        let target_key = self.key_to_scancode_table.get(&key).unwrap();
+        for pressed_key in self.keys_pressed.iter() {
+            if *pressed_key == *target_key {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
 }
 
 pub fn make_renderer() -> Renderer
 {
-    Renderer { display: None, event_pump: None, pixel_buffer: [0; DISPLAY_WIDTH as usize * DISPLAY_HEIGHT as usize] }
+    let mut r = Renderer {
+        display: None,
+        event_pump: None,
+        pixel_buffer: [0; DISPLAY_WIDTH as usize * DISPLAY_HEIGHT as usize],
+        keys_pressed: vec![],
+        key_to_scancode_table: HashMap::new()
+    };
+
+    r.key_to_scancode_table.insert(0x1, Scancode::Num1);
+    r.key_to_scancode_table.insert(0x2, Scancode::Num2);
+    r.key_to_scancode_table.insert(0x3, Scancode::Num3);
+    r.key_to_scancode_table.insert(0xC, Scancode::Num4);
+
+    r.key_to_scancode_table.insert(0x4, Scancode::Q);
+    r.key_to_scancode_table.insert(0x5, Scancode::W);
+    r.key_to_scancode_table.insert(0x6, Scancode::E);
+    r.key_to_scancode_table.insert(0xD, Scancode::R);
+
+    r.key_to_scancode_table.insert(0x7, Scancode::A);
+    r.key_to_scancode_table.insert(0x8, Scancode::S);
+    r.key_to_scancode_table.insert(0x9, Scancode::D);
+    r.key_to_scancode_table.insert(0xE, Scancode::F);
+
+    r.key_to_scancode_table.insert(0xA, Scancode::Z);
+    r.key_to_scancode_table.insert(0x0, Scancode::X);
+    r.key_to_scancode_table.insert(0xB, Scancode::C);
+    r.key_to_scancode_table.insert(0xF, Scancode::V);
+
+    return r;
 }

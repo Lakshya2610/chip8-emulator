@@ -114,7 +114,7 @@ impl CPU {
                     self.registers[x as usize] = self.registers[x as usize].wrapping_add(n as u8);
                 },
                 "0001_nnnn_nnnn_nnnn" => { // jump
-                    self.pc = n;
+                    self.pc = n - 2;
                 },
                 "1011_nnnn_nnnn_nnnn" => { // BNNN jump (or BXNN)
                     let mut jump_reg: usize = 0;
@@ -145,6 +145,15 @@ impl CPU {
                     let vy = self.registers[y as usize];
                     if (i == 5 && vx == vy) || (i == 9 && vx != vy)
                     {
+                        self.pc += 2;
+                    }
+                },
+                "1110_xxxx_iiii_iiii" if i == 0x9E || i == 0xA1 => { // skip if pressed
+                    let vx = self.registers[x as usize];
+                    assert!(vx <= 0xF);
+
+                    let pressed = renderer.is_key_pressed(vx);
+                    if (i == 0x9E && pressed) || (i == 0xA1 && !pressed) {
                         self.pc += 2;
                     }
                 },
