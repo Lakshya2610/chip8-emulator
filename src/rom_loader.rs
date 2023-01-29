@@ -6,40 +6,37 @@ pub fn load_test_prog(cpu: &mut CPU)
 {
     unsafe {
         let mut i = PROG_MEM_START_OFFSET as usize;
-        // set I
-        RAM[i] = 0xA2;
+        // call func @ 0x2F0
+        RAM[i] = 0x22;
         RAM[i + 1] = 0xF0;
         i += 2;
 
-        RAM[0x2F0] = 0b1010_1010;
-
-        // clear screen
-        RAM[i] = 0x00;
-        RAM[i + 1] = 0xE0;
+        // I = 255
+        RAM[i] = 0xA0;
+        RAM[i + 1] = 0xFF;
         i += 2;
 
-        // set V0 = 55
-        RAM[i] = 0x60;
-        RAM[i + 1] = 0x37;
-        i += 2;
-
-        // V1 = 16
+        // V1 = 255
         RAM[i] = 0x61;
-        RAM[i + 1] = 0x10;
+        RAM[i + 1] = 0xFF;
         i += 2;
 
-        // Draw at V0, V1 of len 10
-        RAM[i] = 0xD0;
-        RAM[i + 1] = 0x1A;
+        // V0 = V1 >> 1
+        RAM[i] = 0xB1;
+        RAM[i + 1] = 0x11;
         i += 2;
 
-        // jump to start
-        // RAM[i] = 0x10;
-        // RAM[i + 1] = 0x00;
-        // i += 2;
+        // func @ 0x2F0
+        // V0 = 2
+        RAM[0x2F0] = 0x60;
+        RAM[0x2F0 + 1] = 0x02;
+        // return
+        RAM[0x2F0 + 2] = 0x00;
+        RAM[0x2F0 + 3] = 0xEE;
     }
 
     cpu.set_prog_counter(PROG_MEM_START_OFFSET);
+    cpu.set_mode(CPUMode::Chip48);
 }
 
 pub fn load_prog(cpu: &mut CPU, prog_path: &str) -> bool

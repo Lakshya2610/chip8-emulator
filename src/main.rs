@@ -14,22 +14,27 @@ fn main() {
     cpu.init();
     renderer.init();
 
+    // rom_loader::load_test_prog(&mut cpu);
     rom_loader::load_prog(&mut cpu, "/Users/lakshya/Desktop/emulators/chip8/ROMs/IBM Logo.ch8");
 
     let sleep_dur = 1e9 as u32 / CLOCK_SPEED;
     let mut errored = false;
     println!("Sleep duration: {} nsec", sleep_dur);
+
+    let timer_thread_chan = cpu::start_timer_thread();
     loop {
         if !errored {
             errored = cpu.step(&mut renderer) || errored;
-            // println!("{:?}", cpu);
+            println!("{:?}", cpu);
         }
         
         let should_exit = renderer.step();
         if should_exit {
+            timer_thread_chan.send(true).unwrap(); // signal timer thread to finish
             break;
         }
 
         ::std::thread::sleep(Duration::new(0, sleep_dur));
     }
+    
 }
