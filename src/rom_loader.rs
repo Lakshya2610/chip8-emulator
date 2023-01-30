@@ -7,22 +7,77 @@ pub fn load_test_prog(cpu: &mut CPU)
     unsafe {
         let mut i = PROG_MEM_START_OFFSET as usize;
 
-        // V0 = 2
+        // V0 = 1
         RAM[i] = 0x60;
-        RAM[i + 1] = 0x02;
-        i += 2;
-
-        // V1 += 1
-        RAM[i] = 0x71;
         RAM[i + 1] = 0x01;
         i += 2;
 
-        // skip next if V0 is pressed (EX9E)
-        RAM[i] = 0xE0;
-        RAM[i + 1] = 0x9E;
+        // V1 = 5
+        RAM[i] = 0x61;
+        RAM[i + 1] = 0x05;
         i += 2;
 
-        // jump to 0x202 (V1 += 1) - 1NNN
+        // V2 = 8
+        RAM[i] = 0x62;
+        RAM[i + 1] = 0x08;
+        i += 2;
+
+        // Dump regs to mem
+        RAM[i] = 0xF2;
+        RAM[i + 1] = 55;
+        i += 2;
+
+        // V0 = 0
+        RAM[i] = 0x60;
+        RAM[i + 1] = 0x00;
+        i += 2;
+
+        // V1 = 0
+        RAM[i] = 0x61;
+        RAM[i + 1] = 0x00;
+        i += 2;
+
+        // V2 = 0
+        RAM[i] = 0x62;
+        RAM[i + 1] = 0x00;
+        i += 2;
+
+        // Load regs from mem
+        RAM[i] = 0xF2;
+        RAM[i + 1] = 65;
+        i += 2;
+    }
+
+    cpu.set_prog_counter(PROG_MEM_START_OFFSET);
+    cpu.set_mode(CPUMode::Chip48);
+}
+
+pub fn echo_prog(cpu: &mut CPU)
+{
+    unsafe {
+        let mut i = PROG_MEM_START_OFFSET as usize;
+
+        // save key to V0
+        RAM[i] = 0xF0;
+        RAM[i + 1] = 0x0A;
+        i += 2;
+
+        // clear screen
+        RAM[i] = 0x00;
+        RAM[i + 1] = 0xE0;
+        i += 2;
+
+        // set font sprite to pressed key (in V0)
+        RAM[i] = 0xF0;
+        RAM[i + 1] = 0x29;
+        i += 2;
+
+        // draw
+        RAM[i] = 0xD5;
+        RAM[i + 1] = 0x55;
+        i += 2;
+
+        // jump to start
         RAM[i] = 0x12;
         RAM[i + 1] = 0x00;
         i += 2;

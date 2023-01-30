@@ -6,12 +6,32 @@ use std::sync::mpsc::{self, TryRecvError, Receiver, Sender};
 use crate::renderer::*;
 pub const RAM_SIZE: usize = 4096;
 pub const PROG_MEM_START_OFFSET: u16 = 0x200; // 0x000 to 0x1ff was reserved for interpreter
+pub const FONT_SPRITES_START_OFFSET: u16 = 0x050; // 0x050 to 0x9F
 const MAX_STACK_SIZE: usize = 32; // original chip8 only supported 16, so this should be good enough
 const OPTYPE_MASK: u16 = 0xF000;
 const TIMER_CLOCK_SPEED: f32 = 60.0; // Hz
+static FONT_SPRITES: [u8; 80] =
+[
+    0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+    0x20, 0x60, 0x20, 0x20, 0x70, // 1
+    0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+    0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+    0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+    0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+    0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+    0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+    0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+    0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+    0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+    0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+    0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+    0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+    0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+    0xF0, 0x80, 0xF0, 0x80, 0x80  // F
+];
 
 pub static mut RAM: [u8; RAM_SIZE] = [0; RAM_SIZE];
-static mut TIMERS: [u8; 2] = [0; 2];
+pub static mut TIMERS: [u8; 2] = [0; 2];
 
 #[derive(Debug)]
 #[derive(PartialEq)]
@@ -38,6 +58,12 @@ enum TimerRegs
 {
     Delay = 0,
     Sound
+}
+
+enum RegisterRWMode
+{
+    Read = 0,
+    Write
 }
 
 #[derive(Debug)]
@@ -79,6 +105,15 @@ impl CPU {
         self.pc = 0;
         self.registers = [0; 16];
         self.sp = 0;
+
+        // load font sprites
+        unsafe {
+            let mut write_ptr = FONT_SPRITES_START_OFFSET as usize;
+            for el in FONT_SPRITES {
+                RAM[write_ptr] = el;
+                write_ptr += 1;
+            }
+        }
     }
 
     pub fn set_prog_counter(&mut self, pc: u16)
@@ -86,9 +121,38 @@ impl CPU {
         self.pc = pc;
     }
 
+    pub fn prog_counter(&self) -> u16 {
+        self.pc
+    }
+
     pub fn set_mode(&mut self, mode: CPUMode)
     {
         self.mode = mode;
+    }
+
+    fn register_rw(&mut self, last_reg_num: usize, mode: RegisterRWMode) -> bool
+    {
+        let mut mem_ptr = self.I as usize;
+        if mem_ptr + last_reg_num >= RAM_SIZE {
+            return false; // overflowing mem
+        }
+
+        for reg in 0..(last_reg_num + 1) {
+            unsafe {
+                match mode {
+                    RegisterRWMode::Write => RAM[mem_ptr] = self.registers[reg],
+                    RegisterRWMode::Read => self.registers[reg] = RAM[mem_ptr]
+                }
+            }
+
+            mem_ptr += 1;
+        }
+
+        if self.mode == CPUMode::Chip8 {
+            self.I = mem_ptr as u16;
+        }
+
+        return true;
     }
 
     // returns true if there was an error
@@ -171,11 +235,36 @@ impl CPU {
                 "0000_0000_1110_0000" => {
                     renderer.clear_screen();
                 },
-                _ => return true,
+                "1111_xxxx_iiii_iiii" => { // timers, add to index, get key
+                    match i {
+                        0x07 => self.registers[x as usize] = TIMERS[TimerRegs::Delay as usize],
+                        0x15 => TIMERS[TimerRegs::Delay as usize] = self.registers[x as usize],
+                        0x18 => TIMERS[TimerRegs::Sound as usize] = self.registers[x as usize],
+                        0x1E => {
+                            let overflow: bool;
+                            (self.I, overflow) = self.I.overflowing_add(self.registers[x as usize] as u16);
+                            if overflow || self.I >= RAM_SIZE as u16 {
+                                self.registers[0xF] = 1;
+                            }
+                        },
+                        0x0A => if renderer.is_any_key_pressed() {
+                            // TODO: support key released as well (original behaviour on COSMAC VIP)
+                            self.registers[x as usize] = renderer.get_first_key_pressed();
+                        } else {
+                            self.pc -= 2;
+                        },
+                        0x29 => self.I = FONT_SPRITES_START_OFFSET + ((self.registers[x as usize] as u16 & 0x0F) * 5),
+                        0x33 => if !self.write_decimal_at_I(x as usize) { return false; },
+                        0x55 => if !self.register_rw(x as usize, RegisterRWMode::Write) { return false; },
+                        0x65 => if !self.register_rw(x as usize, RegisterRWMode::Read) { return false; },
+                        _ => return false
+                    }
+                },
+                _ => return false,
             }
 
             self.pc += 2;
-            return false;
+            return true;
         }
     }
 
@@ -259,6 +348,26 @@ impl CPU {
 
         return true;
     }
+
+    fn write_decimal_at_I(&mut self, reg: usize) -> bool
+    {
+        if self.I + 2 >= RAM_SIZE as u16
+        {
+            return false;
+        }
+
+        let mut intval = self.registers[reg];
+        unsafe {
+            RAM[self.I as usize + 2] = intval % 10;
+            intval /= 10;
+            RAM[self.I as usize + 1] = intval % 10;
+            intval /= 10;
+            RAM[self.I as usize] = intval % 10;
+        }
+
+        return true;
+    }
+
 }
 
 unsafe fn timer_ticker(rx: Receiver<bool>)

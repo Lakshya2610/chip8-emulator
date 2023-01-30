@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 pub const DISPLAY_WIDTH: u32 = 64;
 pub const DISPLAY_HEIGHT: u32 = 32;
+pub const DISPLAY_REFRESH_RATE: f32 = 60.0; // Hz
 const DISPLAY_SCALE: u32 = 10;
 
 static VALID_KEYS: [Scancode; 16] = [
@@ -51,10 +52,10 @@ impl Renderer {
         self.event_pump = Some(event_pump);
     }
 
-    // returns true if user requested quit
-    pub fn step(&mut self) -> bool
+    pub fn step(&mut self)
     {
-        self.clear_screen();
+        self.display.as_mut().unwrap().set_draw_color(Color::BLACK);
+        self.display.as_mut().unwrap().clear();
 
         let canvas = self.display.as_mut().unwrap();
         canvas.set_draw_color(Color::WHITE);
@@ -72,7 +73,11 @@ impl Renderer {
 
         canvas.draw_points(points.as_slice()).unwrap();
         self.refresh_screen();
-        
+    }
+
+    // returns true if user requested quit
+    pub fn poll_input(&mut self) -> bool
+    {
         self.keys_pressed.clear();
         for event in self.event_pump.as_mut().unwrap().poll_iter() {
             match event {
@@ -95,6 +100,10 @@ impl Renderer {
 
     pub fn draw(&mut self, x: u8, y: u8) -> bool {
         let pixel_index = ((y as u32 * DISPLAY_WIDTH) + x as u32) as usize;
+        if pixel_index >= self.pixel_buffer.len() {
+            return false; // TODO: not sure what to do in this case
+        }
+
         let curr_pixel = self.pixel_buffer[pixel_index];
 
         self.pixel_buffer[pixel_index] = curr_pixel ^ 1;
@@ -103,6 +112,10 @@ impl Renderer {
     }
 
     pub fn clear_screen(&mut self) {
+        for i in 0..self.pixel_buffer.len() {
+            self.pixel_buffer[i] = 0;
+        }
+
         self.display.as_mut().unwrap().set_draw_color(Color::BLACK);
         self.display.as_mut().unwrap().clear();
     }
@@ -122,7 +135,28 @@ impl Renderer {
         return false;
     }
 
+    pub fn is_any_key_pressed(&mut self) -> bool {
+        self.keys_pressed.len() > 0
+    }
+
+    pub fn get_first_key_pressed(&mut self) -> u8 {
+        if !self.is_any_key_pressed() {
+            return 0;
+        }
+
+        let pressed_key = self.keys_pressed[0];
+        for key in self.key_to_scancode_table.keys() {
+            if *self.key_to_scancode_table.get(key).unwrap() == pressed_key {
+                return *key;
+            }
+        }
+
+        return 0;
+    }
+
 }
+
+unsafe impl Send for Renderer {}
 
 pub fn make_renderer() -> Renderer
 {
