@@ -7,7 +7,7 @@ use sdl2::render::Canvas;
 use sdl2::video::Window;
 use sdl2::event::Event;
 use sdl2::keyboard::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub const DISPLAY_WIDTH: u32 = 64;
 pub const DISPLAY_HEIGHT: u32 = 32;
@@ -22,11 +22,12 @@ static VALID_KEYS: [Scancode; 16] = [
 ];
 
 pub struct Renderer {
-    pixel_buffer: [u8; DISPLAY_WIDTH as usize * DISPLAY_HEIGHT as usize],
+    pixel_buffer: [u64; DISPLAY_HEIGHT as usize],
     display: Option<Canvas<Window>>,
     event_pump: Option<EventPump>,
     keys_pressed: Vec<Scancode>,
-    key_to_scancode_table: HashMap<u8, Scancode>
+    key_to_scancode_table: HashMap<u8, Scancode>,
+    valid_keys_set: HashSet<Scancode>
 }
 
 impl Renderer {
@@ -50,6 +51,39 @@ impl Renderer {
 
         self.display = Some(canvas);
         self.event_pump = Some(event_pump);
+
+        self.init_key_to_scancode_table();
+        self.init_valid_keys_set();
+    }
+
+    fn init_key_to_scancode_table(&mut self)
+    {
+        self.key_to_scancode_table.insert(0x1, Scancode::Num1);
+        self.key_to_scancode_table.insert(0x2, Scancode::Num2);
+        self.key_to_scancode_table.insert(0x3, Scancode::Num3);
+        self.key_to_scancode_table.insert(0xC, Scancode::Num4);
+
+        self.key_to_scancode_table.insert(0x4, Scancode::Q);
+        self.key_to_scancode_table.insert(0x5, Scancode::W);
+        self.key_to_scancode_table.insert(0x6, Scancode::E);
+        self.key_to_scancode_table.insert(0xD, Scancode::R);
+
+        self.key_to_scancode_table.insert(0x7, Scancode::A);
+        self.key_to_scancode_table.insert(0x8, Scancode::S);
+        self.key_to_scancode_table.insert(0x9, Scancode::D);
+        self.key_to_scancode_table.insert(0xE, Scancode::F);
+
+        self.key_to_scancode_table.insert(0xA, Scancode::Z);
+        self.key_to_scancode_table.insert(0x0, Scancode::X);
+        self.key_to_scancode_table.insert(0xB, Scancode::C);
+        self.key_to_scancode_table.insert(0xF, Scancode::V);
+    }
+
+    fn init_valid_keys_set(&mut self)
+    {
+        for key in VALID_KEYS {
+            self.valid_keys_set.insert(key);
+        }
     }
 
     pub fn step(&mut self)
@@ -61,13 +95,22 @@ impl Renderer {
         canvas.set_draw_color(Color::WHITE);
 
         let mut points: Vec<Point> = Vec::with_capacity((DISPLAY_WIDTH * DISPLAY_HEIGHT / 2) as usize);
-        for (index, col) in self.pixel_buffer.iter().enumerate()
+        for (row, color_bitfield) in self.pixel_buffer.iter().enumerate()
         {
-            if *col > 0
-            {
-                let x = index % DISPLAY_WIDTH as usize;
-                let y = index / DISPLAY_WIDTH as usize;
-                points.push(Point::new(x as i32, y as i32));
+            if *color_bitfield == 0 {
+                continue;
+            }
+
+            let mut bitfield = *color_bitfield;
+            for col in 0..64 {
+                if (bitfield & 1) > 0 {
+                    points.push(Point::new(col, row as i32));
+                }
+
+                bitfield >>= 1;
+                if bitfield == 0 {
+                    break;
+                }
             }
         }
 
@@ -83,7 +126,7 @@ impl Renderer {
             match event {
                 Event::Quit {..} => { return true; }
                 Event::KeyDown { scancode: Some(key), .. } => {
-                    if VALID_KEYS.contains(&key) {
+                    if self.valid_keys_set.contains(&key) {
                         self.keys_pressed.push(key);
                     }
 
@@ -99,14 +142,19 @@ impl Renderer {
     }
 
     pub fn draw(&mut self, x: u8, y: u8) -> bool {
-        let pixel_index = ((y as u32 * DISPLAY_WIDTH) + x as u32) as usize;
-        if pixel_index >= self.pixel_buffer.len() {
-            return false; // TODO: not sure what to do in this case
+        let (row, col) = (y as usize, x as usize);
+        if row >= DISPLAY_HEIGHT as usize || col >= DISPLAY_WIDTH as usize
+        {
+            return false;
         }
 
-        let curr_pixel = self.pixel_buffer[pixel_index];
+        let curr_pixel = (self.pixel_buffer[row] >> col) & 1;
 
-        self.pixel_buffer[pixel_index] = curr_pixel ^ 1;
+        if (curr_pixel ^ 1) > 0 {
+            self.pixel_buffer[row] |= 1 << col;
+        } else {
+            self.pixel_buffer[row] &= !(1 << col);
+        }
         
         return curr_pixel > 0;
     }
@@ -156,37 +204,14 @@ impl Renderer {
 
 }
 
-unsafe impl Send for Renderer {}
-
 pub fn make_renderer() -> Renderer
 {
-    let mut r = Renderer {
+    Renderer {
         display: None,
         event_pump: None,
-        pixel_buffer: [0; DISPLAY_WIDTH as usize * DISPLAY_HEIGHT as usize],
-        keys_pressed: vec![],
-        key_to_scancode_table: HashMap::new()
-    };
-
-    r.key_to_scancode_table.insert(0x1, Scancode::Num1);
-    r.key_to_scancode_table.insert(0x2, Scancode::Num2);
-    r.key_to_scancode_table.insert(0x3, Scancode::Num3);
-    r.key_to_scancode_table.insert(0xC, Scancode::Num4);
-
-    r.key_to_scancode_table.insert(0x4, Scancode::Q);
-    r.key_to_scancode_table.insert(0x5, Scancode::W);
-    r.key_to_scancode_table.insert(0x6, Scancode::E);
-    r.key_to_scancode_table.insert(0xD, Scancode::R);
-
-    r.key_to_scancode_table.insert(0x7, Scancode::A);
-    r.key_to_scancode_table.insert(0x8, Scancode::S);
-    r.key_to_scancode_table.insert(0x9, Scancode::D);
-    r.key_to_scancode_table.insert(0xE, Scancode::F);
-
-    r.key_to_scancode_table.insert(0xA, Scancode::Z);
-    r.key_to_scancode_table.insert(0x0, Scancode::X);
-    r.key_to_scancode_table.insert(0xB, Scancode::C);
-    r.key_to_scancode_table.insert(0xF, Scancode::V);
-
-    return r;
+        pixel_buffer: [0; DISPLAY_HEIGHT as usize],
+        keys_pressed: Vec::with_capacity(4),
+        key_to_scancode_table: HashMap::new(),
+        valid_keys_set: HashSet::new()
+    }
 }

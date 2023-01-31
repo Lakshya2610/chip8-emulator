@@ -15,8 +15,8 @@ fn main() {
     renderer.init();
 
     // rom_loader::load_test_prog(&mut cpu);
-    rom_loader::echo_prog(&mut cpu);
-    // rom_loader::load_prog(&mut cpu, "/Users/lakshya/Desktop/emulators/chip8/ROMs/Keypad Test [Hap, 2006].ch8");
+    // rom_loader::echo_prog(&mut cpu);
+    rom_loader::load_prog(&mut cpu, "/Users/lakshya/Desktop/emulators/chip8/ROMs/Chip8 emulator Logo [Garstyciuks].ch8");
     // cpu.set_mode(CPUMode::Chip8);
 
     let sleep_dur = 1.0 / CLOCK_SPEED as f32;
