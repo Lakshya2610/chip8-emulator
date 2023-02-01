@@ -7,17 +7,61 @@ use std::time::Duration;
 
 const CLOCK_SPEED: u32 = 700; // hz
 
+fn print_args_help() {
+    println!("Run the emulator using: chip8 '<rom path>' -mode (chip8|chip48)");
+    println!("\t-mode: (Optional) emulator can run in two modes, select the one that your rom was written for");
+}
+
+fn handle_args(args: &Vec<String>, cpu: &mut CPU) -> bool {
+    match args.len() {
+        0 | 1 => {
+            println!("No rom specified, exiting");
+            false
+        },
+        2 => {
+            let prog_path = args[1].as_str();
+            rom_loader::load_prog(cpu, &prog_path)
+        },
+        4 => {
+            let prog_path = args[1].as_str();
+            let rom_loaded = rom_loader::load_prog(cpu, &prog_path);
+            if !rom_loaded {
+                println!("Error loading rom, path may be wrong");
+            }
+
+            let mode_specified = args[2].as_str() == "-mode";
+
+            rom_loaded && mode_specified && match args[3].as_str() {
+                "chip8" => {
+                    cpu.set_mode(CPUMode::Chip8);
+                    true
+                },
+                "chip48" => {
+                    cpu.set_mode(CPUMode::Chip48);
+                    true
+                },
+                _ => false
+            }
+        },
+        _ => false
+    }
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
     let mut cpu: CPU = make_cpu();
     let mut renderer: Renderer = make_renderer();
 
     cpu.init();
     renderer.init();
 
-    // rom_loader::load_test_prog(&mut cpu);
-    // rom_loader::echo_prog(&mut cpu);
-    rom_loader::load_prog(&mut cpu, "/Users/lakshya/Desktop/emulators/chip8/ROMs/Chip8 emulator Logo [Garstyciuks].ch8");
-    // cpu.set_mode(CPUMode::Chip8);
+    println!();
+    println!();
+    if !handle_args(&args, &mut cpu) {
+        print_args_help();
+        return;
+    }
 
     let sleep_dur = 1.0 / CLOCK_SPEED as f32;
     let sleep_dur_ms: f32 = 1000.0 / CLOCK_SPEED as f32;
@@ -36,12 +80,10 @@ fn main() {
 
         if !errored {
             errored = !cpu.step(&mut renderer) || errored;
-            // println!("{:?}", cpu);
             if errored {
                 println!("CPU error or end of code");
             }
         }
-        // unsafe { println!("Timers: {:?}", TIMERS); }
 
         if last_display_referesh_t >= display_referesh_t {
             renderer.step();

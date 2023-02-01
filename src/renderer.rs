@@ -25,7 +25,7 @@ pub struct Renderer {
     pixel_buffer: [u64; DISPLAY_HEIGHT as usize],
     display: Option<Canvas<Window>>,
     event_pump: Option<EventPump>,
-    keys_pressed: Vec<Scancode>,
+    keys_pressed: HashSet<Scancode>,
     key_to_scancode_table: HashMap<u8, Scancode>,
     valid_keys_set: HashSet<Scancode>
 }
@@ -121,19 +121,20 @@ impl Renderer {
     // returns true if user requested quit
     pub fn poll_input(&mut self) -> bool
     {
-        self.keys_pressed.clear();
         for event in self.event_pump.as_mut().unwrap().poll_iter() {
             match event {
                 Event::Quit {..} => { return true; }
                 Event::KeyDown { scancode: Some(key), .. } => {
-                    if self.valid_keys_set.contains(&key) {
-                        self.keys_pressed.push(key);
-                    }
-
-                    if key == Scancode::Escape {
-                        return true;
+                    match key {
+                        Scancode::Escape => return true,
+                        _ => if self.valid_keys_set.contains(&key) {
+                            self.keys_pressed.insert(key);
+                        }
                     }
                 },
+                Event::KeyUp { scancode: Some(key), .. } => {
+                    self.keys_pressed.remove(&key);
+                }
                 _ => {}
             }
         }
@@ -168,6 +169,7 @@ impl Renderer {
         self.display.as_mut().unwrap().clear();
     }
 
+    #[inline(always)]
     pub fn refresh_screen(&mut self) {
         self.display.as_mut().unwrap().present();
     }
@@ -183,6 +185,7 @@ impl Renderer {
         return false;
     }
 
+    #[inline(always)]
     pub fn is_any_key_pressed(&mut self) -> bool {
         self.keys_pressed.len() > 0
     }
@@ -192,10 +195,11 @@ impl Renderer {
             return 0;
         }
 
-        let pressed_key = self.keys_pressed[0];
-        for key in self.key_to_scancode_table.keys() {
-            if *self.key_to_scancode_table.get(key).unwrap() == pressed_key {
-                return *key;
+        for el in self.keys_pressed.iter() {
+            for key in self.key_to_scancode_table.keys() {
+                if *self.key_to_scancode_table.get(key).unwrap() == *el {
+                    return *key;
+                }
             }
         }
 
@@ -210,7 +214,7 @@ pub fn make_renderer() -> Renderer
         display: None,
         event_pump: None,
         pixel_buffer: [0; DISPLAY_HEIGHT as usize],
-        keys_pressed: Vec::with_capacity(4),
+        keys_pressed: HashSet::with_capacity(4),
         key_to_scancode_table: HashMap::new(),
         valid_keys_set: HashSet::new()
     }
