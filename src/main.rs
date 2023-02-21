@@ -1,8 +1,12 @@
 mod cpu;
 mod renderer;
 mod rom_loader;
+mod events;
+mod save;
 use cpu::*;
 use renderer::*;
+use events::SystemEvent;
+use save::*;
 use std::time::Duration;
 
 const CLOCK_SPEED: u32 = 700; // hz
@@ -10,9 +14,10 @@ const CLOCK_SPEED: u32 = 700; // hz
 fn print_args_help() {
     println!("Run the emulator using: chip8 '<rom path>' -mode (chip8|chip48)");
     println!("\t-mode: (Optional) emulator can run in two modes, select the one that your rom was written for");
+    println!("Load a saved state from savefile using: chip8 -load '<savefile>'");
 }
 
-fn handle_args(args: &Vec<String>, cpu: &mut CPU) -> bool {
+fn handle_args(args: &Vec<String>, cpu: &mut CPU, renderer: &mut Renderer) -> bool {
     match args.len() {
         0 | 1 => {
             println!("No rom specified, exiting");
@@ -22,6 +27,11 @@ fn handle_args(args: &Vec<String>, cpu: &mut CPU) -> bool {
             let prog_path = args[1].as_str();
             rom_loader::load_prog(cpu, &prog_path)
         },
+        3 => {
+            let loading_savefile = args[1].as_str() == "-load";
+            let mut save = make_save();
+            loading_savefile && save.load(args[2].as_str(), cpu, renderer)
+        }
         4 => {
             let prog_path = args[1].as_str();
             let rom_loaded = rom_loader::load_prog(cpu, &prog_path);
@@ -47,6 +57,10 @@ fn handle_args(args: &Vec<String>, cpu: &mut CPU) -> bool {
     }
 }
 
+fn sys_sleep(dur: f32) {
+    ::std::thread::sleep(Duration::from_secs_f32(dur));
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -58,7 +72,7 @@ fn main() {
 
     println!();
     println!();
-    if !handle_args(&args, &mut cpu) {
+    if !handle_args(&args, &mut cpu, &mut renderer) {
         print_args_help();
         return;
     }
@@ -71,11 +85,39 @@ fn main() {
 
     let mut last_display_referesh_t: f32 = 0.0;
     let display_referesh_t: f32 = 1000.0 / DISPLAY_REFRESH_RATE;
+
+    let mut paused = false;
     loop {
-        let should_exit = renderer.poll_input();
-        if should_exit {
-            timer_thread_chan.send(true).unwrap(); // signal timer thread to finish
-            break;
+        let sys_event = renderer.poll_input();
+
+        match sys_event {
+            SystemEvent::Exit => {
+                timer_thread_chan.send(SystemEvent::Exit).unwrap();
+                break;
+            },
+            SystemEvent::Pause => {
+                paused = !paused;
+                if paused {
+                    timer_thread_chan.send(SystemEvent::Pause).unwrap();
+                } else {
+                    timer_thread_chan.send(SystemEvent::Resume).unwrap();
+                }
+            },
+            SystemEvent::Save => {
+                let mut save = make_save();
+                
+                println!("Building save");
+                save.build(&mut cpu, &mut renderer);
+
+                println!("Writing save to disk");
+                save.write_to_disk();
+            }
+            _ => {}
+        }
+
+        if paused {
+            sys_sleep(sleep_dur);
+            continue;
         }
 
         if !errored {
@@ -90,7 +132,7 @@ fn main() {
             last_display_referesh_t = 0.0;
         }
 
-        ::std::thread::sleep(Duration::from_secs_f32(sleep_dur));
+        sys_sleep(sleep_dur);
         last_display_referesh_t += sleep_dur_ms;
     }
     

@@ -8,6 +8,8 @@ use sdl2::video::Window;
 use sdl2::event::Event;
 use sdl2::keyboard::*;
 use std::collections::{HashMap, HashSet};
+use crate::events::*;
+use crate::save::*;
 
 pub const DISPLAY_WIDTH: u32 = 64;
 pub const DISPLAY_HEIGHT: u32 = 32;
@@ -54,6 +56,30 @@ impl Renderer {
 
         self.init_key_to_scancode_table();
         self.init_valid_keys_set();
+    }
+
+    pub fn save_state(&mut self, save: &mut Save)
+    {
+        for row in self.pixel_buffer {
+            let mut r = row;
+            for _ in 0..8 {
+                let byte: u8 = (r & 0xFF) as u8;
+                save.write(byte);
+                r = r >> 8;
+            }
+        }
+    }
+
+    pub fn load_state(&mut self, save: &mut Save)
+    {
+        for i in 0..self.pixel_buffer.len() {
+            let mut row: u64 = 0;
+            for j in 0..8 {
+                row = row | ((save.read() as u64) << (j * 8));
+            }
+
+            self.pixel_buffer[i] = row;
+        }
     }
 
     fn init_key_to_scancode_table(&mut self)
@@ -119,14 +145,16 @@ impl Renderer {
     }
 
     // returns true if user requested quit
-    pub fn poll_input(&mut self) -> bool
+    pub fn poll_input(&mut self) -> SystemEvent
     {
         for event in self.event_pump.as_mut().unwrap().poll_iter() {
             match event {
-                Event::Quit {..} => { return true; }
+                Event::Quit {..} => { return SystemEvent::Exit; }
                 Event::KeyDown { scancode: Some(key), .. } => {
                     match key {
-                        Scancode::Escape => return true,
+                        Scancode::Escape => return SystemEvent::Exit,
+                        Scancode::P => return SystemEvent::Pause,
+                        Scancode::Num0 => return SystemEvent::Save,
                         _ => if self.valid_keys_set.contains(&key) {
                             self.keys_pressed.insert(key);
                         }
@@ -139,7 +167,7 @@ impl Renderer {
             }
         }
 
-        return false;
+        return SystemEvent::None;
     }
 
     pub fn draw(&mut self, x: u8, y: u8) -> bool {

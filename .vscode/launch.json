@@ -5,17 +5,28 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Load save",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/chip8",
+            "args": ["-load", "/Users/lakshya/Desktop/emulators/chip8/save.c8s"],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb"
+        },
+        {
             "name": "Debug",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/chip8",
-            "args": [],
+            "args": ["/Users/lakshya/Desktop/emulators/chip8/ROMs/br8kout.ch8"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
             "externalConsole": false,
             "MIMode": "lldb"
         }
-
     ]
 }

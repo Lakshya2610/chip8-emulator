@@ -4,6 +4,9 @@
 use bitmatch::bitmatch;
 use std::sync::mpsc::{self, TryRecvError, Receiver, Sender};
 use crate::renderer::*;
+use crate::events::*;
+use crate::save::*;
+
 pub const RAM_SIZE: usize = 4096;
 pub const PROG_MEM_START_OFFSET: u16 = 0x200; // 0x000 to 0x1ff was reserved for interpreter
 pub const FONT_SPRITES_START_OFFSET: u16 = 0x050; // 0x050 to 0x9F
@@ -33,8 +36,7 @@ static FONT_SPRITES: [u8; 80] =
 pub static mut RAM: [u8; RAM_SIZE] = [0; RAM_SIZE];
 pub static mut TIMERS: [u8; 2] = [0; 2];
 
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 // needed due to both ver having diff impl for some instr
 pub enum CPUMode
 {
@@ -67,35 +69,13 @@ enum RegisterRWMode
 }
 
 #[derive(Debug)]
-struct Stack {
-    data: Vec<u16>,
-}
-
-#[derive(Debug)]
 pub struct CPU {
     pc: u16,
     I: u16,              // index register - points to loc in mem
     registers: [u8; 16], // general purpose registers [V0, V1, ...VF]
+    stack: [u16; MAX_STACK_SIZE],
     sp: u8,              // stack pointer
-    stack: Stack,
     mode: CPUMode,
-}
-
-impl Stack {
-    pub fn push(&mut self, n: u16) {
-        if self.data.len() >= MAX_STACK_SIZE {
-            format!(
-                "Stack Overflow - exceeded stack size limit of {} when pushing value {}",
-                MAX_STACK_SIZE, n
-            );
-            panic!();
-        }
-        self.data.push(n);
-    }
-
-    pub fn pop(&mut self) -> u16 {
-        self.data.pop().unwrap()
-    }
 }
 
 impl CPU {
@@ -104,6 +84,7 @@ impl CPU {
         self.I = 0;
         self.pc = 0;
         self.registers = [0; 16];
+        self.stack = [0; MAX_STACK_SIZE];
         self.sp = 0;
 
         // load font sprites
@@ -113,6 +94,58 @@ impl CPU {
                 RAM[write_ptr] = el;
                 write_ptr += 1;
             }
+        }
+    }
+
+    pub fn save_state(&mut self, save: &mut Save)
+    {
+        save.write((self.pc & 0xFF) as u8);
+        save.write((self.pc >> 8) as u8);
+        save.write((self.I & 0xFF) as u8);
+        save.write((self.I >> 8) as u8);
+        for reg in self.registers {
+            save.write(reg);
+        }
+
+        for stack_val in self.stack {
+            save.write((stack_val & 0xFF) as u8);
+            save.write((stack_val >> 8) as u8);
+        }
+
+        save.write(self.sp);
+        match self.mode {
+            CPUMode::Chip8 => save.write(0),
+            CPUMode::Chip48 => save.write(1)
+        }
+
+        unsafe {
+            save.write(TIMERS[TimerRegs::Delay as usize]);
+            save.write(TIMERS[TimerRegs::Sound as usize]);
+        }
+    }
+
+    pub fn load_state(&mut self, save: &mut Save)
+    {
+        self.pc = save.read_u16();
+        self.I = save.read_u16();
+        for i in 0..self.registers.len() {
+            self.registers[i] = save.read();
+        }
+
+        for i in 0..self.stack.len() {
+            self.stack[i] = save.read_u16();
+        }
+
+        self.sp = save.read();
+        match save.read() {
+            0 => self.mode = CPUMode::Chip8,
+            1 => self.mode = CPUMode::Chip48,
+            _ => panic!("Invalid CPU mode in save file")
+        }
+
+        unsafe {
+            TIMERS[TimerRegs::Delay as usize] = save.read();
+            TIMERS[TimerRegs::Sound as usize] = save.read();
         }
     }
 
@@ -155,6 +188,26 @@ impl CPU {
         return true;
     }
 
+    fn stack_push(&mut self, n: u16)
+    {
+        if self.sp >= MAX_STACK_SIZE as u8 {
+            panic!("Stack overflow: tried to push when stack was already full");
+        }
+        
+        self.stack[self.sp as usize] = n;
+        self.sp += 1;
+    }
+
+    fn stack_pop(&mut self) -> u16
+    {
+        if self.sp == 0 {
+            panic!("Tried to pop from stack when it's already empty");
+        }
+
+        self.sp -= 1;
+        self.stack[self.sp as usize]
+    }
+
     // returns true if there was an error
     #[bitmatch]
     pub fn step(&mut self, renderer: &mut Renderer) -> bool {
@@ -189,13 +242,11 @@ impl CPU {
                     self.pc = n + (self.registers[jump_reg] as u16) - 2;
                 },
                 "0010_nnnn_nnnn_nnnn" => { // 2NNN => call subroutine
-                    self.stack.push(self.pc);
-                    self.sp = self.stack.data.len() as u8;
+                    self.stack_push(self.pc);
                     self.pc = n - 2; // -2 since pc is incr at the end
                 },
                 "0000_0000_1110_1110" => { // return (00EE)
-                    self.pc = self.stack.pop();
-                    self.sp -= 1;
+                    self.pc = self.stack_pop();
                 },
                 "iiii_xxxx_nnnn_nnnn" if i == 3 || i == 4 => { // 3XNN or 4XNN
                     let vx = self.registers[x as usize];
@@ -370,22 +421,33 @@ impl CPU {
 
 }
 
-unsafe fn timer_ticker(rx: Receiver<bool>)
+unsafe fn timer_ticker(rx: Receiver<SystemEvent>)
 {
+    let mut paused = false;
     loop {
         match rx.try_recv() {
-            Ok(_) | Err(TryRecvError::Disconnected) => {
-                println!("TimerThread: recv terminate signal, exiting");
+            Ok(event) => {
+                println!("TimerThread: recv event {:?}", event);
+                match event {
+                    SystemEvent::Pause => paused = true,
+                    SystemEvent::Resume => paused = false,
+                    SystemEvent::Exit => break,
+                    SystemEvent::Save => {},
+                    _ => {}
+                }
+            }
+            Err(TryRecvError::Disconnected) => {
+                println!("TimerThread: comms channel disconnected, exiting");
                 break;
             }
             Err(TryRecvError::Empty) => {}
         }
 
-        if TIMERS[TimerRegs::Delay as usize] > 0 {
+        if !paused && TIMERS[TimerRegs::Delay as usize] > 0 {
             TIMERS[TimerRegs::Delay as usize] -= 1;
         }
 
-        if TIMERS[TimerRegs::Sound as usize] > 0 {
+        if !paused && TIMERS[TimerRegs::Sound as usize] > 0 {
             TIMERS[TimerRegs::Sound as usize] -= 1;
         }
 
@@ -399,15 +461,14 @@ pub fn make_cpu() -> CPU {
         I: 0,
         registers: [0; 16],
         sp: 0,
-        stack:
-        Stack { data: Vec::with_capacity(16) },
+        stack: [0; MAX_STACK_SIZE],
         mode: CPUMode::Chip8
     }
 }
 
-pub fn start_timer_thread() -> Sender<bool>
+pub fn start_timer_thread() -> Sender<SystemEvent>
 {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::channel::<SystemEvent>();
     std::thread::spawn(|| unsafe { timer_ticker(rx); });
     return tx;
 }
